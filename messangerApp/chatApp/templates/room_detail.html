@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>{{ room.name }} - Chat</title>
+    <style>
+        .chat-box {
+            border: 1px solid #ccc;
+            height: 300px;
+            overflow-y: scroll;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+
+        .message {
+            margin-bottom: 5px;
+        }
+
+        .sender {
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Room: {{ room.name }}</h1>
+    <a href="{% url 'chatApp:room_list' %}">&larr; Back to Rooms</a>
+
+    <div class="chat-box" id="chat-box">
+        {% for message in messages %}
+        <div class="message">
+            <span class="sender">{{ message.sender.username }}:</span> {{ message.content }}
+        </div>
+        {% empty %}
+        <p id="empty-msg">No messages yet. Be the first to say hi!</p>
+        {% endfor %}
+    </div>
+
+    <input type="text" id="chat-message-input" placeholder="Type a message..." autocomplete="off" autofocus>
+    <button id="chat-message-submit">Send</button>
+
+    <script>
+        const roomName = "{{ room.name|escapejs }}";
+        const wsProtocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+        const chatSocket = new WebSocket(wsProtocol + window.location.host + '/ws/chat/' + encodeURIComponent(roomName) + '/');
+
+        chatSocket.onopen = function (e) {
+            console.log("WebSocket connected successfully!");
+        };
+
+        chatSocket.onclose = function (e) {
+            console.error("WebSocket closed unexpectedly. Check your terminal for backend errors.");
+        };
+
+        chatSocket.onmessage = function (e) {
+            const data = JSON.parse(e.data);
+
+            // Hide the "No messages yet" text if it exists
+            const emptyMsg = document.getElementById('empty-msg');
+            if (emptyMsg) { emptyMsg.style.display = 'none'; }
+
+            // Create a new message div and append it
+            const chatBox = document.getElementById('chat-box');
+            chatBox.innerHTML += '<div class="message"><span class="sender">' + data.username + ':</span> ' + data.message + '</div>';
+            chatBox.scrollTop = chatBox.scrollHeight; // Auto-scroll to bottom
+        };
+
+        document.querySelector('#chat-message-submit').onclick = function (e) {
+            const messageInputDom = document.querySelector('#chat-message-input');
+            const message = messageInputDom.value;
+            chatSocket.send(JSON.stringify({ 'message': message }));
+            messageInputDom.value = ''; // Clear input
+        };
+
+        // Allow pressing 'Enter' to send the message
+        document.querySelector('#chat-message-input').onkeyup = function (e) {
+            if (e.keyCode === 13) {
+                document.querySelector('#chat-message-submit').click();
+            }
+        };
+    </script>
+</body>
+
+</html>

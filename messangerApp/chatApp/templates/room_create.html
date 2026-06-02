@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create Room</title>
+</head>
+<body>
+    <h1>Create a New Chat Room</h1>
+    <a href="{% url 'chatApp:room_list' %}">&larr; Back to Rooms</a>
+    <br><br>
+    
+    <form method="POST">
+        {% csrf_token %}
+        <label>Room Name:</label><br>
+        <input type="text" name="name" required><br><br>
+        
+        <label>Make Private?</label>
+        <input type="checkbox" name="is_private"><br><br>
+        
+        <label>Password (if private):</label><br>
+        <input type="password" name="password"><br><br>
+        
+        <button type="submit">Create Room</button>
+    </form>
+</body>
+</html>
