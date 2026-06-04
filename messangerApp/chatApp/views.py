@@ -13,22 +13,28 @@ def room_list(request):
 def room_detail(request, room_name):
     room = get_object_or_404(Room, name=room_name)
 
-    # Gatekeeper Logic: Check if user is a participant
+    if request.method == "POST":
+        if "join_password" in request.POST:
+            password = request.POST.get("join_password")
+            if room.check_password(password):
+                room.participants.add(request.user)
+                return redirect('chatApp:room_detail', room_name=room.name)
+            return render(request, "room_join.html", {"room": room, "error": "Incorrect password"})
+
+        if request.user not in room.participants.all():
+            if room.is_private:
+                return render(request, "room_join.html", {"room": room, "error": "You must join the room before sending messages."})
+            room.participants.add(request.user)
+
+        content = request.POST.get("content", "").strip()
+        if content:
+            Message.objects.create(room=room, sender=request.user, content=content)
+        return redirect('chatApp:room_detail', room_name=room.name)
+
     if request.user not in room.participants.all():
         if room.is_private:
-            # If private, handle password submission
-            if request.method == "POST" and "join_password" in request.POST:
-                password = request.POST.get("join_password")
-                if room.check_password(password):
-                    room.participants.add(request.user)
-                    return redirect('chatApp:room_detail', room_name=room.name)
-                else:
-                    return render(request, "room_join.html", {"room": room, "error": "Incorrect password"})
-            # If GET request, show the password prompt
             return render(request, "room_join.html", {"room": room})
-        else:
-            # If public, auto-join
-            room.participants.add(request.user)
+        room.participants.add(request.user)
 
     messages = room.messages.all()
     return render(request, "room_detail.html", {"room": room, "messages": messages})
@@ -40,19 +46,21 @@ def create_room(request):
         is_private = request.POST.get("is_private") == "on"
         password = request.POST.get("password") if is_private else None
 
-        if name:
-            # Check if a room with this name already exists
-            if Room.objects.filter(name=name).exists():
-                error_msg = "A room with this name already exists. Please choose another."
-                return render(request, "room_create.html", {"error": error_msg})
-            
-            else:
-                # Create the room if the name is unique
-                room = Room.objects.create(name=name, is_private=is_private)
-                if is_private and password:
-                    room.set_password(password)
-                    room.save()
-                room.participants.add(request.user)
-                return redirect('chatApp:room_detail', room_name=room.name)
+        if not name:
+            return render(request, "room_create.html", {"error": "Room name is required."})
+
+        if is_private and not password:
+            return render(request, "room_create.html", {"error": "Private rooms require a password."})
+
+        if Room.objects.filter(name=name).exists():
+            error_msg = "A room with this name already exists. Please choose another."
+            return render(request, "room_create.html", {"error": error_msg})
+
+        room = Room.objects.create(name=name, is_private=is_private)
+        if is_private:
+            room.set_password(password)
+            room.save()
+        room.participants.add(request.user)
+        return redirect('chatApp:room_detail', room_name=room.name)
 
     return render(request, "room_create.html")

@@ -35,27 +35,45 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
 
     async def receive(self, text_data):
-        text_data_json = json.loads(text_data)
-        message_content = text_data_json['message']
+        try:
+            text_data_json = json.loads(text_data)
+        except json.JSONDecodeError:
+            await self.send(text_data=json.dumps({"type": "error", "message": "Invalid message format."}))
+            return
+
+        message_content = text_data_json.get('message', '').strip()
         user = self.scope['user']
 
-        if user.is_authenticated:
-            # Save message to database
-            await self.save_message(user.id, self.room.id, message_content)
+        if not user.is_authenticated:
+            await self.close()
+            return
 
-            # Broadcast message to room group
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    'type': 'chat_message',
-                    'message': message_content,
-                    'username': user.username
-                }
-            )
+        if not message_content:
+            await self.send(text_data=json.dumps({"type": "error", "message": "Cannot send an empty message."}))
+            return
+
+        if not await self.is_participant(user.id, self.room.id):
+            await self.send(text_data=json.dumps({"type": "error", "message": "Join the room before sending messages."}))
+            return
+
+        await self.save_message(user.id, self.room.id, message_content)
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                'type': 'chat_message',
+                'message': message_content,
+                'username': user.username
+            }
+        )
 
     async def chat_message(self, event):
         # Send message to the WebSocket
         await self.send(text_data=json.dumps(event))
+
+    @database_sync_to_async
+    def is_participant(self, user_id, room_id):
+        return Room.objects.filter(id=room_id, participants__id=user_id).exists()
 
     @database_sync_to_async
     def get_room(self, room_name):

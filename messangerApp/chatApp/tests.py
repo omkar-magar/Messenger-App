@@ -83,6 +83,17 @@ class ChatViewTest(TestCase):
         self.assertRedirects(response, reverse('chatApp:room_detail', kwargs={'room_name': self.private_room.name}))
         self.assertIn(self.user1, self.private_room.participants.all())
 
+    def test_private_room_creation_requires_password(self):
+        self.client.login(username="user1", password="password123")
+        response = self.client.post(
+            reverse('chatApp:room_create'),
+            {"name": "SecretRoom", "is_private": "on", "password": ""}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'room_create.html')
+        self.assertContains(response, "Private rooms require a password.")
+        self.assertFalse(Room.objects.filter(name="SecretRoom").exists())
+
     def test_post_message(self):
         self.client.login(username="user1", password="password123")
         self.public_room.participants.add(self.user1)
