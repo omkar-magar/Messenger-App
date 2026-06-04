@@ -5,6 +5,62 @@ import asyncio
 import websockets
 import re
 import json
+import requests
+
+class LoginWorker(QThread):
+    """Handles HTTP authentication requests to the Django backend."""
+    finished = Signal(bool, str, str)  # success, token/error_message, username
+
+    def __init__(self, username, password):
+        super().__init__()
+        self.username = username
+        self.password = password
+
+    def run(self):
+        # Django DRF default token endpoint (adjust URL as needed)
+        url = "http://localhost:8000/api-token-auth/"
+        try:
+            response = requests.post(
+                url, 
+                data={"username": self.username, "password": self.password},
+                timeout=5
+            )
+            if response.status_code == 200:
+                token = response.json().get("token")
+                self.finished.emit(True, token, self.username)
+            else:
+                error_msg = response.json().get("non_field_errors", ["Invalid credentials"])[0]
+                self.finished.emit(False, error_msg, "")
+        except Exception as e:
+            self.finished.emit(False, f"Connection failed: {str(e)}", "")
+
+class RegisterWorker(QThread):
+    """Handles HTTP registration requests to the Django backend."""
+    finished = Signal(bool, str)  # success, message
+
+    def __init__(self, username, password, email=""):
+        super().__init__()
+        self.username = username
+        self.password = password
+        self.email = email
+
+    def run(self):
+        url = "http://localhost:8000/api/register/" # Adjust based on your urls.py
+        try:
+            response = requests.post(
+                url,
+                json={"username": self.username, "password": self.password, "email": self.email},
+                timeout=5
+            )
+            if response.status_code == 201:
+                self.finished.emit(True, "Registration successful! Please log in.")
+            else:
+                # Extract error message from Django's response
+                errors = response.json()
+                error_text = str(errors.get("username", errors.get("password", ["Registration failed"])[0]))
+                self.finished.emit(False, error_text)
+        except Exception as e:
+            self.finished.emit(False, f"Connection failed: {str(e)}")
 
 class WebSocketWorker(QThread):
     """Skeleton for the background thread that will talk to server.py"""
@@ -70,7 +126,7 @@ class MainWindow(QStackedWidget):
         self.resize(400, 300)
         self.show()
 
-    def go_to_chat(self, username):
+    def go_to_chat(self, username, token=None):
         self.chat_page.set_username(username)
         self.chat_page.connect_to_server()
         self.setCurrentWidget(self.chat_page)
@@ -129,7 +185,17 @@ class LoginPage(QWidget):
         layout.addWidget(self.password_input)
         layout.addWidget(self.error_label)
         layout.addWidget(self.login_button)
+        
+        # Add a registration link for better UX
+        self.register_button = QPushButton("Don't have an account? Register")
+        self.register_button.setFlat(True)
+        self.register_button.setStyleSheet("color: blue; text-decoration: underline; border: none;")
+        self.register_button.clicked.connect(self.register)
+        layout.addWidget(self.register_button)
+
         self.setLayout(layout)
+        self.auth_worker = None
+        self.reg_worker = None
 
     def _reveal_password(self) -> None:
         """Show password text when button is held."""
@@ -158,10 +224,48 @@ class LoginPage(QWidget):
         self.login_button.setEnabled(is_password_valid and len(username) > 0)
 
     def login(self):
+        """Triggered when the user clicks Login."""
         username = self.username_input.text()
-        print(f"Logged in as {username}")
-        # Emit a signal that MainWindow can listen to
-        self.login_successful.emit(username)
+        password = self.password_input.text()
+        
+        # Visual feedback: disable UI while authenticating
+        self.login_button.setEnabled(False)
+        self.login_button.setText("Authenticating...")
+        self.username_input.setEnabled(False)
+        self.password_input.setEnabled(False)
+
+        self.auth_worker = LoginWorker(username, password)
+        self.auth_worker.finished.connect(self._handle_auth_result)
+        self.auth_worker.start()
+
+    def register(self):
+        """Triggered when the user clicks Register."""
+        username = self.username_input.text()
+        password = self.password_input.text()
+
+        if not username or not password:
+            self.error_label.setText("Please enter both username and password to register.")
+            return
+
+        self.register_button.setEnabled(False)
+        self.reg_worker = RegisterWorker(username, password)
+        self.reg_worker.finished.connect(self._handle_reg_result)
+        self.reg_worker.start()
+
+    def _handle_reg_result(self, success, message):
+        self.error_label.setText(message)
+        self.error_label.setStyleSheet(f"color: {'green' if success else 'red'}; font-size: 11px;")
+        self.register_button.setEnabled(True)
+
+    def _handle_auth_result(self, success, result, username):
+        if success:
+            self.login_successful.emit(username)
+        else:
+            self.error_label.setText(result)
+            self.login_button.setEnabled(True)
+            self.login_button.setText("Login")
+            self.username_input.setEnabled(True)
+            self.password_input.setEnabled(True)
 
 class ChatPage(QWidget):
     def __init__(self, parent=None):
